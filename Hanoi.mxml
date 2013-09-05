@@ -1,0 +1,234 @@
+<?xml version="1.0" encoding="utf-8"?>
+
+<!-- ハノイの塔 -->
+<mx:Application xmlns:mx="http://www.adobe.com/2006/mxml" creationComplete="onInitApp()" backgroundGradientColors="[#0080FF, #FFFFFF]">
+
+  <mx:Panel id="panel" title="The Tower of Hanoi">
+      <mx:HBox horizontalAlign="center" verticalAlign="middle">
+        <mx:Label text=" n:" fontSize="15" />
+        <mx:ComboBox id="numberChoice" change="onChoose()" />
+        <mx:Button id="startButton" label="Start" click="onStart()" />
+        <mx:HSlider id="speed" minimum="0" maximum="100" value="50" snapInterval="5" tickInterval="20"
+          dataTipPlacement="bottom" labels="['slow','fast']" 
+          allowTrackClick="true" liveDragging="true" />
+      </mx:HBox>
+      <mx:Canvas id="canvas" width="400" height="200" />
+  </mx:Panel>
+
+  <mx:Script>
+    <![CDATA[
+
+import flash.display.Shape;
+import flash.events.Event;
+import flash.events.TimerEvent;
+import flash.utils.Timer;
+import flash.filters.BitmapFilter;
+import flash.filters.BitmapFilterQuality;
+import flash.filters.DropShadowFilter;
+
+private const discColors:Array =   [0xCCCCFF, 0xFFCCCC, 0xFFCCFF, 0xCCFFCC, 0xCCFFFF, 0xFFFFCC, 0xFFFFFF];
+private const borderColors:Array = [0x9999CC, 0xCC9999, 0xCC99CC, 0x99CC99, 0x99CCCC, 0xCCCC99, 0xCCCCCC];
+private const widths:Array = [40, 50, 60, 70, 80, 90, 100];
+private const polePositions:Array = [80, 200, 320];
+private const MAX_NUM_DISCS:int = 7;
+
+private var discs:Array = new Array(MAX_NUM_DISCS);
+
+private var basePole:int = 0;
+private var timer:Timer = new Timer(1000, 1);
+private var poles:Array;
+private var solution:Array;
+private var currentSolutionIndex:int;
+private var discFilters:Array;
+
+/**
+ * 円盤 n 枚で構成されるハノイの塔を解く
+ *
+ * @param n 円盤数
+ * @param from 開始する柱番号
+ * @param to 移動先の柱番号
+ * @param other それ以外の柱番号
+ * @param solution 現在までの解が格納された配列 (再帰用)
+ * @return 解が格納された配列
+ */
+private function doHanoi(n:int, from:int, other:int, to:int, solution:Array):Array {
+    if (0 < n) {
+        doHanoi(n - 1, from, to, other, solution);
+        solution.push([n - 1, from, to]);
+        doHanoi(n - 1, other, from, to, solution);
+    }
+    return solution;
+}
+
+/**
+ * 選択された速度値を間隔値に変換する
+ */
+private function delay():int {
+    return 530 - 5 * speed.value;
+}
+
+/**
+ * キャンバス初期化．
+ * 板と柱を描画し，円盤を生成する．
+ */
+private function onInitApp():void {
+    canvas.graphics.lineStyle(2, 0x779999);
+    canvas.graphics.beginFill(0xD4E9FF);
+    canvas.graphics.drawRoundRect(10, 10, 380, 180, 8);
+    canvas.graphics.endFill();
+
+    canvas.graphics.lineStyle(2, 0xA2845C);
+    canvas.graphics.beginFill(0xD2B48C);
+    canvas.graphics.drawRoundRect(20, 160, 360, 16, 4);
+    canvas.graphics.drawRoundRect(polePositions[0] - 6, 40, 12, 120, 4);
+    canvas.graphics.drawRoundRect(polePositions[1] - 6, 40, 12, 120, 4);
+    canvas.graphics.drawRoundRect(polePositions[2] - 6, 40, 12, 120, 4);
+    canvas.graphics.endFill();
+
+    for (var n:int = 0; n < MAX_NUM_DISCS; ++n) {
+        var disc:Shape = new Shape();
+        canvas.rawChildren.addChild(disc);
+        disc.graphics.lineStyle(2, borderColors[n]);
+        disc.graphics.beginFill(discColors[n]);
+        disc.graphics.drawRoundRect(-widths[n] / 2, 0, widths[n], 12, 4);
+        disc.graphics.endFill();
+        disc.visible = false;
+        discs[n] = disc;
+    }
+
+    var filter:DropShadowFilter = new DropShadowFilter();
+    filter.alpha = 0.5;
+    filter.angle = 45;
+    filter.blurX = 5;
+    filter.blurY = 5;
+    filter.color = 0x000000;
+    filter.distance = 5;
+    filter.hideObject = false;
+    filter.inner = false;
+    filter.knockout = false;
+    filter.quality = BitmapFilterQuality.HIGH;
+    filter.strength = 1;
+    discFilters = [filter];
+
+    var choice:Array = [];
+    for (var nChoide:int = 0; nChoide < MAX_NUM_DISCS; ++nChoide) {
+        choice.push(nChoide + 1);
+    }
+    numberChoice.dataProvider = choice;
+    numberChoice.selectedIndex = 3;
+    numberChoice.rowCount = MAX_NUM_DISCS;
+    onChoose();
+}
+
+/**
+ * @param discId 移動する円盤
+ * @param pole 移動先の柱番号
+ * @param y 移動先の縦位置
+ * @param next 移動後の処理
+ */
+private function moveDisc(discId:int, pole:int, y:int, next:Function = null):void {
+    var disc:DisplayObject = discs[discId];
+    if (next == null) {
+        disc.x = polePositions[pole];
+        disc.y = 146 - y * 14;
+    } else {
+        var fx:int = disc.x;
+        var fy:int = disc.y;
+        var tx:int = polePositions[pole];
+        var ty:int = 146 - y * 14;
+        var count:int = 0;
+        disc.alpha = 0.5;
+        disc.filters = discFilters;
+        var moveTimer:Timer = new Timer(1 + int(delay() / 20), 10);
+        moveTimer.addEventListener(
+            TimerEvent.TIMER,
+            function(e:Event):void {
+                ++count;
+                disc.x = fx + (tx - fx) * count / 10;
+                disc.y = fy + (ty - fy) * count / 10;
+            });
+        moveTimer.addEventListener(
+            TimerEvent.TIMER_COMPLETE,
+            function(e:Event):void {
+                disc.x = tx;
+                disc.y = ty;
+                disc.alpha = 1;
+                disc.filters = [];
+                next();
+            });
+        moveTimer.start();
+    }
+}
+
+/**
+ * 現在の状態配列の内容に基づいて円盤を配置する．
+ */
+private function arrangeDiscs(poles:Array):void {
+    for (var pos:int = 0; pos < 3; ++pos) {
+        for (var y:int = 0, len:int = poles[pos].length; y < len; ++y) {
+            moveDisc(poles[pos][y], pos, y);
+        }
+    }
+}
+
+/**
+ * 円盤数変更
+ */
+private function onChoose():void {
+    var numDiscs:int = int(numberChoice.value);
+
+    poles = [[], [], []];
+    for (var n:int = 0; n < MAX_NUM_DISCS; ++n) {
+        if (n < numDiscs) {
+            poles[basePole].unshift(n);
+            discs[n].visible = true;
+        } else {
+            discs[n].visible = false;
+        }
+    }
+    arrangeDiscs(poles);
+}
+
+/**
+ * 解答開始
+ */
+private function onStart():void {
+    startButton.enabled = false;
+    numberChoice.enabled = false;
+    panel.status = "solving...";
+
+    solution = doHanoi(int(numberChoice.value), basePole, 1, basePole ^ 2, []);
+    currentSolutionIndex = 0;
+    onChoose();
+
+    timer.delay = 10;
+    timer.addEventListener(TimerEvent.TIMER, onTick);
+    timer.start();
+}
+
+/**
+ * 次の手順へ遷移
+ */
+private function onTick(e:Event):void {
+    timer.reset();
+    if (currentSolutionIndex < solution.length) {
+        var process:Array = solution[currentSolutionIndex++];
+        var discId:int = poles[process[1]].pop();
+        poles[process[2]].push(discId);
+        timer.delay = 10;
+        moveDisc(
+            discId, process[2],
+            poles[process[2]].length - 1,
+            function():void { timer.start(); });
+    } else {
+        startButton.enabled = true;
+        numberChoice.enabled = true;
+        basePole ^= 2;
+        panel.status = "";
+    }
+}
+
+      ]]>
+  </mx:Script>
+
+</mx:Application>
